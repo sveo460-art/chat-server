@@ -1,0 +1,266 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Чат</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .chat-container {
+            width: 90%;
+            max-width: 1200px;
+            height: 80vh;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            display: flex;
+            overflow: hidden;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .user-info {
+            padding: 20px;
+            background: #e9ecef;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .user-name {
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        .rooms {
+            flex: 1;
+            padding: 20px;
+        }
+        
+        .rooms h3 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+        
+        .room-btn {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 5px;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.3s;
+        }
+        
+        .room-btn:hover {
+            background: #e9ecef;
+        }
+        
+        .room-btn.active {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        
+        .users-list {
+            padding: 20px;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        .users-list h3 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+        
+        #users {
+            list-style: none;
+        }
+        
+        #users li {
+            padding: 5px 0;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        
+        .chat-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            animation: fadeIn 0.3s;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .message.system {
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+            font-size: 12px;
+        }
+        
+        .message-header {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+        
+        .message-username {
+            font-weight: bold;
+            color: #007bff;
+        }
+        
+        .message-content {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 10px;
+            display: inline-block;
+            max-width: 70%;
+        }
+        
+        .message-input {
+            padding: 20px;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            gap: 10px;
+        }
+        
+        #messageInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        #sendBtn {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        #sendBtn:hover {
+            background: #0056b3;
+        }
+        
+        .typing-indicator {
+            padding: 10px 20px;
+            color: #6c757d;
+            font-size: 12px;
+            font-style: italic;
+        }
+        
+        .join-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .join-form {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            width: 300px;
+        }
+        
+        .join-form input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+        }
+        
+        .join-form button {
+            width: 100%;
+            padding: 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="join-screen" id="joinScreen">
+        <div class="join-form">
+            <h2>Вход в чат</h2>
+            <input type="text" id="usernameInput" placeholder="Ваше имя" maxlength="20">
+            <button onclick="joinChat()">Войти</button>
+        </div>
+    </div>
+    
+    <div class="chat-container" id="chatContainer" style="display: none;">
+        <div class="sidebar">
+            <div class="user-info">
+                <div class="user-name" id="currentUser"></div>
+            </div>
+            <div class="rooms">
+                <h3>Комнаты</h3>
+                <button class="room-btn active" onclick="changeRoom('general')"># general</button>
+                <button class="room-btn" onclick="changeRoom('random')"># random</button>
+                <button class="room-btn" onclick="changeRoom('help')"># help</button>
+            </div>
+            <div class="users-list">
+                <h3>Пользователи онлайн</h3>
+                <ul id="users"></ul>
+            </div>
+        </div>
+        <div class="chat-main">
+            <div class="messages" id="messages"></div>
+            <div class="typing-indicator" id="typingIndicator"></div>
+            <div class="message-input">
+                <input type="text" id="messageInput" placeholder="Введите сообщение..." onkeypress="handleKeyPress(event)">
+                <button id="sendBtn" onclick="sendMessage()">Отправить</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="client.js"></script>
+</body>
+</html>

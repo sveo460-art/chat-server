@@ -1,0 +1,13 @@
+{
+  "name": "chat-server",
+  "version": "1.0.0",
+  "description": "WebSocket Chat Server",
+  "main": "server-cloud.js",
+  "scripts": {
+    "start": "node server-cloud.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  }
+}
