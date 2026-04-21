@@ -1,8 +1,13 @@
-﻿let ws = null;
+// ========== Глобальные переменные ==========
+let ws = null;
 let currentUser = null;
 let currentRoom = 'general';
 let typingTimeout = null;
+let notificationPermission = false;
+let unreadCount = 0;
+let emojiPickerVisible = false;
 
+// ========== Подключение к чату ==========
 function joinChat() {
     const username = document.getElementById('usernameInput').value.trim();
     if (!username) {
@@ -27,6 +32,12 @@ function joinChat() {
         document.getElementById('joinScreen').style.display = 'none';
         document.getElementById('chatContainer').style.display = 'flex';
         document.getElementById('currentUser').textContent = currentUser;
+        
+        // Добавляем кнопки после загрузки
+        setTimeout(() => {
+            addEmojiButton();
+            addImageButton();
+        }, 500);
     };
     
     ws.onmessage = (event) => {
@@ -47,10 +58,16 @@ function joinChat() {
     };
 }
 
+// ========== Обработка сообщений ==========
 function handleMessage(data) {
     switch(data.type) {
         case 'message':
             displayMessage(data);
+            showNotification(data.username, data.content);
+            break;
+        case 'image':
+            displayImageMessage(data);
+            showNotification(data.username, '📷 Изображение');
             break;
         case 'history':
             displayHistory(data.messages);
@@ -68,13 +85,15 @@ function handleMessage(data) {
     }
 }
 
+// ========== Отображение текстовых сообщений ==========
 function displayMessage(message) {
     const messagesDiv = document.getElementById('messages');
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${message.isSystem ? 'system' : ''}`;
+    messageDiv.id = `msg-${message.id}`;
     
     if (message.isSystem) {
-        messageDiv.innerHTML = `<div class="message-content">${message.content}</div>`;
+        messageDiv.innerHTML = `<div class="message-content">${escapeHtml(message.content)}</div>`;
     } else {
         const time = new Date(message.timestamp).toLocaleTimeString();
         messageDiv.innerHTML = `
@@ -83,24 +102,91 @@ function displayMessage(message) {
                 <span> ${time}</span>
             </div>
             <div class="message-content">${escapeHtml(message.content)}</div>
+            <div class="message-reactions" id="reactions-${message.id}"></div>
         `;
+        
+        // Добавляем кнопки реакций
+        addReactionButtons(message.id);
     }
     
     messagesDiv.appendChild(messageDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
+// ========== Отображение изображений ==========
+function displayImageMessage(message) {
+    const messagesDiv = document.getElementById('messages');
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message';
+    messageDiv.id = `msg-${message.id}`;
+    
+    const time = new Date(message.timestamp).toLocaleTimeString();
+    messageDiv.innerHTML = `
+        <div class="message-header">
+            <span class="message-username">${escapeHtml(message.username)}</span>
+            <span> ${time}</span>
+        </div>
+        <img src="${message.imageData}" style="max-width: 250px; max-height: 250px; border-radius: 10px; margin-top: 5px; cursor: pointer;" onclick="window.open('${message.imageData}', '_blank')">
+        ${message.caption ? `<div style="margin-top: 5px; color: #666;">${escapeHtml(message.caption)}</div>` : ''}
+        <div class="message-reactions" id="reactions-${message.id}"></div>
+    `;
+    
+    messagesDiv.appendChild(messageDiv);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    
+    // Добавляем кнопки реакций
+    addReactionButtons(message.id);
+}
+
+// ========== История сообщений ==========
 function displayHistory(messages) {
     const messagesDiv = document.getElementById('messages');
     messagesDiv.innerHTML = '';
-    messages.forEach(message => displayMessage(message));
+    messages.forEach(message => {
+        if (message.type === 'image') {
+            displayImageMessage(message);
+        } else {
+            displayMessage(message);
+        }
+    });
 }
 
+// ========== Реакции на сообщения ==========
+function addReactionButtons(messageId) {
+    const reactionsDiv = document.getElementById(`reactions-${messageId}`);
+    if (!reactionsDiv) return;
+    
+    const reactions = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+    reactions.forEach(reaction => {
+        const btn = document.createElement('button');
+        btn.textContent = reaction;
+        btn.style.margin = '2px';
+        btn.style.padding = '2px 6px';
+        btn.style.border = 'none';
+        btn.style.borderRadius = '12px';
+        btn.style.cursor = 'pointer';
+        btn.style.fontSize = '12px';
+        btn.onclick = () => addReaction(messageId, reaction);
+        reactionsDiv.appendChild(btn);
+    });
+}
+
+function addReaction(messageId, reaction) {
+    ws.send(JSON.stringify({
+        type: 'reaction',
+        messageId: messageId,
+        reaction: reaction,
+        username: currentUser
+    }));
+}
+
+// ========== Список пользователей ==========
 function updateUserList(users) {
     const usersList = document.getElementById('users');
     usersList.innerHTML = users.map(user => `<li>${escapeHtml(user)}</li>`).join('');
 }
 
+// ========== Индикатор набора текста ==========
 let typingTimeoutId = null;
 let isTyping = false;
 
@@ -136,6 +222,7 @@ function showTypingIndicator(username, typing) {
     }
 }
 
+// ========== Отправка сообщений ==========
 function sendMessage() {
     const input = document.getElementById('messageInput');
     const content = input.value.trim();
@@ -150,6 +237,93 @@ function sendMessage() {
     input.value = '';
 }
 
+// ========== Отправка изображений ==========
+function sendImage() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file.size > 5 * 1024 * 1024) {
+            alert('Изображение не должно превышать 5 МБ');
+            return;
+        }
+        
+        const reader = new FileReader();
+        
+        reader.onload = (event) => {
+            ws.send(JSON.stringify({
+                type: 'image',
+                imageData: event.target.result,
+                caption: ''
+            }));
+        };
+        
+        reader.readAsDataURL(file);
+    };
+    
+    input.click();
+}
+
+// ========== Эмодзи-пикер ==========
+function toggleEmojiPicker() {
+    const picker = document.getElementById('emojiPicker');
+    if (!picker) return;
+    
+    emojiPickerVisible = !emojiPickerVisible;
+    picker.style.display = emojiPickerVisible ? 'block' : 'none';
+    
+    if (emojiPickerVisible) {
+        picker.addEventListener('emoji-click', event => {
+            const input = document.getElementById('messageInput');
+            input.value += event.detail.unicode;
+            input.focus();
+            toggleEmojiPicker();
+        });
+    }
+}
+
+function addEmojiButton() {
+    const messageInput = document.querySelector('.message-input');
+    if (messageInput && !document.getElementById('emojiBtn')) {
+        const emojiBtn = document.createElement('button');
+        emojiBtn.id = 'emojiBtn';
+        emojiBtn.textContent = '😊';
+        emojiBtn.style.marginRight = '10px';
+        emojiBtn.style.padding = '10px 15px';
+        emojiBtn.style.borderRadius = '5px';
+        emojiBtn.style.border = 'none';
+        emojiBtn.style.cursor = 'pointer';
+        emojiBtn.style.fontSize = '18px';
+        emojiBtn.onclick = toggleEmojiPicker;
+        messageInput.insertBefore(emojiBtn, messageInput.firstChild);
+    }
+}
+
+function addImageButton() {
+    const messageInput = document.querySelector('.message-input');
+    if (messageInput && !document.getElementById('imageBtn')) {
+        const imageBtn = document.createElement('button');
+        imageBtn.id = 'imageBtn';
+        imageBtn.textContent = '📷';
+        imageBtn.style.marginRight = '10px';
+        imageBtn.style.padding = '10px 15px';
+        imageBtn.style.borderRadius = '5px';
+        imageBtn.style.border = 'none';
+        imageBtn.style.cursor = 'pointer';
+        imageBtn.style.fontSize = '18px';
+        imageBtn.onclick = sendImage;
+        const emojiBtn = document.getElementById('emojiBtn');
+        if (emojiBtn) {
+            messageInput.insertBefore(imageBtn, emojiBtn.nextSibling);
+        } else {
+            messageInput.insertBefore(imageBtn, messageInput.firstChild);
+        }
+    }
+}
+
+// ========== Смена комнаты ==========
 function changeRoom(room) {
     if (room === currentRoom) return;
     
@@ -168,93 +342,48 @@ function highlightActiveRoom() {
     });
 }
 
+// ========== Уведомления ==========
+function requestNotificationPermission() {
+    if ('Notification' in window) {
+        Notification.requestPermission().then(permission => {
+            notificationPermission = permission === 'granted';
+        });
+    }
+}
+
+function showNotification(sender, message) {
+    if (notificationPermission && document.hidden) {
+        new Notification(`Новое сообщение от ${sender}`, {
+            body: message.length > 50 ? message.slice(0, 50) + '...' : message,
+            icon: 'https://img.icons8.com/color/96/chat.png',
+            vibrate: [200, 100, 200]
+        });
+        
+        unreadCount++;
+        document.title = `(${unreadCount}) Чат`;
+    }
+}
+
+// Сброс счётчика при фокусе на странице
+window.addEventListener('focus', () => {
+    unreadCount = 0;
+    document.title = 'Чат';
+});
+
+// ========== Вспомогательные функции ==========
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
-// Уведомления о новых сообщениях
-let notificationPermission = false;
-let unreadCount = 0;
 
-// Запрос разрешения на уведомления
-function requestNotificationPermission() {
-  if ('Notification' in window) {
-    Notification.requestPermission().then(permission => {
-      notificationPermission = permission === 'granted';
-    });
-  }
-}
-
-// Показ уведомления
-function showNotification(sender, message) {
-  if (notificationPermission && document.hidden) {
-    new Notification(`Новое сообщение от ${sender}`, {
-      body: message.length > 50 ? message.slice(0, 50) + '...' : message,
-      icon: 'https://img.icons8.com/color/96/chat.png',
-      badge: 'https://img.icons8.com/color/96/chat.png',
-      vibrate: [200, 100, 200]
-    });
-    
-    // Обновляем заголовок страницы
-    unreadCount++;
-    document.title = `(${unreadCount}) Чат`;
-  }
-}
-
-// Сброс счётчика при фокусе на странице
-window.addEventListener('focus', () => {
-  unreadCount = 0;
-  document.title = 'Чат';
-});
-
-// Запрашиваем разрешение при загрузке
+// Запрашиваем разрешение на уведомления
 requestNotificationPermission();
 
-// Измените функцию displayMessage, добавив в неё уведомление:
-const originalDisplayMessage = displayMessage;
-displayMessage = function(message) {
-  originalDisplayMessage(message);
-  if (!message.isSystem && message.username !== currentUser) {
-    showNotification(message.username, message.content);
-  }
-};
-// Эмодзи пикер
-let emojiPickerVisible = false;
-
-function toggleEmojiPicker() {
-  const picker = document.getElementById('emojiPicker');
-  if (!picker) return;
-  
-  emojiPickerVisible = !emojiPickerVisible;
-  picker.style.display = emojiPickerVisible ? 'block' : 'none';
-  
-  if (emojiPickerVisible) {
-    picker.addEventListener('emoji-click', event => {
-      const input = document.getElementById('messageInput');
-      input.value += event.detail.unicode;
-      input.focus();
-      toggleEmojiPicker();
-    });
-  }
-}
-
-// Добавьте кнопку эмодзи в интерфейс (в HTML или через JS)
-function addEmojiButton() {
-  const messageInput = document.querySelector('.message-input');
-  if (messageInput && !document.getElementById('emojiBtn')) {
-    const emojiBtn = document.createElement('button');
-    emojiBtn.id = 'emojiBtn';
-    emojiBtn.textContent = '😊';
-    emojiBtn.style.marginRight = '10px';
-    emojiBtn.style.padding = '10px 15px';
-    emojiBtn.style.borderRadius = '5px';
-    emojiBtn.style.border = 'none';
-    emojiBtn.style.cursor = 'pointer';
-    emojiBtn.onclick = toggleEmojiPicker;
-    messageInput.insertBefore(emojiBtn, messageInput.firstChild);
-  }
-}
-
-// Вызовите при загрузке
-setTimeout(addEmojiButton, 1000);
+// ========== Обработка Enter в поле ввода ==========
+document.addEventListener('DOMContentLoaded', () => {
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+        messageInput.addEventListener('keypress', handleKeyPress);
+    }
+});
