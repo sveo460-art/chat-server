@@ -2,26 +2,28 @@ const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Раздаём статические файлы из папки public
 app.use(express.static('public'));
 
-// Хранилище данных
+const users = {};
 const rooms = {
-  'general': { clients: new Map(), messages: [] } // Map: ws -> username
+  'general': { clients: new Map(), messages: [] }
 };
-const MAX_MESSAGES = 100; // храним только последние 100 сообщений
+const MAX_MESSAGES = 100;
 
-// Генерация уникального ID для сообщений
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
 function generateMessageId() {
   return Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 }
 
-// Отправка сообщения всем в комнате
 function broadcastToRoom(roomName, senderWs, message, includeSelf = true) {
   const room = rooms[roomName];
   if (!room) return;
@@ -36,15 +38,14 @@ function broadcastToRoom(roomName, senderWs, message, includeSelf = true) {
   });
 }
 
-// Отправка списка пользователей
 function updateUserList(roomName) {
   const room = rooms[roomName];
   if (!room) return;
   
-  const users = Array.from(room.clients.values());
+  const userList = Array.from(room.clients.values());
   const userListMessage = JSON.stringify({
     type: 'user_list',
-    users: users
+    users: userList
   });
   
   room.clients.forEach((_, clientWs) => {
@@ -54,13 +55,12 @@ function updateUserList(roomName) {
   });
 }
 
-// Обработка WebSocket соединений
 wss.on('connection', (ws) => {
   console.log('Новое соединение');
   let currentRoom = 'general';
   let username = null;
+  let isAuthenticated = false;
   
-  // Отправляем историю сообщений
   const sendMessageHistory = (roomName) => {
     const room = rooms[roomName];
     if (room && room.messages.length > 0) {
@@ -74,11 +74,57 @@ wss.on('connection', (ws) => {
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data);
-      console.log('Получено:', message.type);
       
       switch(message.type) {
-        case 'join':
+        case 'register':
+          if (users[message.username]) {
+            ws.send(JSON.stringify({
+              type: 'auth_error',
+              error: 'Пользователь уже существует'
+            }));
+            return;
+          }
+          
+          users[message.username] = {
+            password: hashPassword(message.password),
+            createdAt: new Date().toISOString()
+          };
+          
+          ws.send(JSON.stringify({
+            type: 'auth_success',
+            message: 'Регистрация успешна'
+          }));
+          break;
+          
+        case 'login':
+          if (!users[message.username]) {
+            ws.send(JSON.stringify({
+              type: 'auth_error',
+              error: 'Пользователь не найден'
+            }));
+            return;
+          }
+          
+          if (users[message.username].password !== hashPassword(message.password)) {
+            ws.send(JSON.stringify({
+              type: 'auth_error',
+              error: 'Неверный пароль'
+            }));
+            return;
+          }
+          
+          isAuthenticated = true;
           username = message.username;
+          
+          ws.send(JSON.stringify({
+            type: 'auth_success',
+            message: 'Вход выполнен'
+          }));
+          break;
+          
+        case 'join':
+          if (!isAuthenticated) return;
+          
           currentRoom = message.room || 'general';
           
           if (!rooms[currentRoom]) {
@@ -102,7 +148,7 @@ wss.on('connection', (ws) => {
           break;
           
         case 'message':
-          if (!username) return;
+          if (!isAuthenticated) return;
           
           const chatMessage = {
             type: 'message',
@@ -122,16 +168,9 @@ wss.on('connection', (ws) => {
           broadcastToRoom(currentRoom, ws, chatMessage);
           break;
           
-        case 'typing':
-          const typingMessage = {
-            type: 'typing',
-            username: username,
-            isTyping: message.isTyping
-          };
-          broadcastToRoom(currentRoom, ws, typingMessage, false);
-          break;
-          
         case 'change_room':
+          if (!isAuthenticated) return;
+          
           const oldRoom = currentRoom;
           const newRoom = message.room;
           
@@ -175,46 +214,9 @@ wss.on('connection', (ws) => {
             room: currentRoom
           }));
           break;
-          
-        // ========== РЕАКЦИИ - НОВЫЙ ОБРАБОТЧИК ==========
-        case 'reaction':
-          console.log(`👍 Реакция от ${username}: ${message.reaction} на сообщение ${message.messageId}`);
-          
-          const reactionBroadcast = {
-            type: 'reaction',
-            messageId: message.messageId,
-            reaction: message.reaction,
-            username: username,
-            timestamp: new Date().toISOString()
-          };
-          broadcastToRoom(currentRoom, ws, reactionBroadcast);
-          break;
-          
-        // ========== ИЗОБРАЖЕНИЯ ==========
-        case 'image':
-          if (!username) return;
-          
-          const imageMessage = {
-            type: 'image',
-            id: generateMessageId(),
-            username: username,
-            imageData: message.imageData,
-            caption: message.caption || '',
-            timestamp: new Date().toISOString(),
-            isSystem: false
-          };
-          
-          const imgRoom = rooms[currentRoom];
-          imgRoom.messages.push(imageMessage);
-          if (imgRoom.messages.length > MAX_MESSAGES) {
-            imgRoom.messages.shift();
-          }
-          
-          broadcastToRoom(currentRoom, ws, imageMessage);
-          break;
       }
     } catch (error) {
-      console.error('Ошибка обработки сообщения:', error);
+      console.error('Ошибка:', error);
     }
   });
   
@@ -244,5 +246,5 @@ wss.on('connection', (ws) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Сервер запущен на http://localhost:${PORT}`);
+  console.log(`Сервер запущен на порту ${PORT}`);
 });
