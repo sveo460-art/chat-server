@@ -173,3 +173,49 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+// Уведомления о новых сообщениях
+let notificationPermission = false;
+let unreadCount = 0;
+
+// Запрос разрешения на уведомления
+function requestNotificationPermission() {
+  if ('Notification' in window) {
+    Notification.requestPermission().then(permission => {
+      notificationPermission = permission === 'granted';
+    });
+  }
+}
+
+// Показ уведомления
+function showNotification(sender, message) {
+  if (notificationPermission && document.hidden) {
+    new Notification(`Новое сообщение от ${sender}`, {
+      body: message.length > 50 ? message.slice(0, 50) + '...' : message,
+      icon: 'https://img.icons8.com/color/96/chat.png',
+      badge: 'https://img.icons8.com/color/96/chat.png',
+      vibrate: [200, 100, 200]
+    });
+    
+    // Обновляем заголовок страницы
+    unreadCount++;
+    document.title = `(${unreadCount}) Чат`;
+  }
+}
+
+// Сброс счётчика при фокусе на странице
+window.addEventListener('focus', () => {
+  unreadCount = 0;
+  document.title = 'Чат';
+});
+
+// Запрашиваем разрешение при загрузке
+requestNotificationPermission();
+
+// Измените функцию displayMessage, добавив в неё уведомление:
+const originalDisplayMessage = displayMessage;
+displayMessage = function(message) {
+  originalDisplayMessage(message);
+  if (!message.isSystem && message.username !== currentUser) {
+    showNotification(message.username, message.content);
+  }
+};
