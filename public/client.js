@@ -219,3 +219,42 @@ displayMessage = function(message) {
     showNotification(message.username, message.content);
   }
 };
+// Эмодзи пикер
+let emojiPickerVisible = false;
+
+function toggleEmojiPicker() {
+  const picker = document.getElementById('emojiPicker');
+  if (!picker) return;
+  
+  emojiPickerVisible = !emojiPickerVisible;
+  picker.style.display = emojiPickerVisible ? 'block' : 'none';
+  
+  if (emojiPickerVisible) {
+    picker.addEventListener('emoji-click', event => {
+      const input = document.getElementById('messageInput');
+      input.value += event.detail.unicode;
+      input.focus();
+      toggleEmojiPicker();
+    });
+  }
+}
+
+// Добавьте кнопку эмодзи в интерфейс (в HTML или через JS)
+function addEmojiButton() {
+  const messageInput = document.querySelector('.message-input');
+  if (messageInput && !document.getElementById('emojiBtn')) {
+    const emojiBtn = document.createElement('button');
+    emojiBtn.id = 'emojiBtn';
+    emojiBtn.textContent = '😊';
+    emojiBtn.style.marginRight = '10px';
+    emojiBtn.style.padding = '10px 15px';
+    emojiBtn.style.borderRadius = '5px';
+    emojiBtn.style.border = 'none';
+    emojiBtn.style.cursor = 'pointer';
+    emojiBtn.onclick = toggleEmojiPicker;
+    messageInput.insertBefore(emojiBtn, messageInput.firstChild);
+  }
+}
+
+// Вызовите при загрузке
+setTimeout(addEmojiButton, 1000);
