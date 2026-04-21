@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
 const path = require('path');
@@ -21,7 +21,7 @@ function generateMessageId() {
   return Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 }
 
-// Отправка сообщения всем в комнате (кроме отправителя, если нужно)
+// Отправка сообщения всем в комнате
 function broadcastToRoom(roomName, senderWs, message, includeSelf = true) {
   const room = rooms[roomName];
   if (!room) return;
@@ -36,7 +36,7 @@ function broadcastToRoom(roomName, senderWs, message, includeSelf = true) {
   });
 }
 
-// Отправка списка пользователей в комнате
+// Отправка списка пользователей
 function updateUserList(roomName) {
   const room = rooms[roomName];
   if (!room) return;
@@ -74,25 +74,20 @@ wss.on('connection', (ws) => {
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data);
+      console.log('Получено:', message.type);
       
       switch(message.type) {
         case 'join':
-          // Пользователь присоединяется с именем
           username = message.username;
           currentRoom = message.room || 'general';
           
-          // Создаём комнату если её нет
           if (!rooms[currentRoom]) {
             rooms[currentRoom] = { clients: new Map(), messages: [] };
           }
           
-          // Добавляем пользователя в комнату
           rooms[currentRoom].clients.set(ws, username);
-          
-          // Отправляем историю
           sendMessageHistory(currentRoom);
           
-          // Оповещаем всех о новом пользователе
           const joinMessage = {
             type: 'message',
             id: generateMessageId(),
@@ -103,13 +98,10 @@ wss.on('connection', (ws) => {
           };
           rooms[currentRoom].messages.push(joinMessage);
           broadcastToRoom(currentRoom, ws, joinMessage);
-          
-          // Обновляем список пользователей
           updateUserList(currentRoom);
           break;
           
         case 'message':
-          // Обычное сообщение
           if (!username) return;
           
           const chatMessage = {
@@ -121,20 +113,16 @@ wss.on('connection', (ws) => {
             isSystem: false
           };
           
-          // Сохраняем в историю комнаты
           const room = rooms[currentRoom];
           room.messages.push(chatMessage);
-          // Ограничиваем историю
           if (room.messages.length > MAX_MESSAGES) {
             room.messages.shift();
           }
           
-          // Рассылаем всем в комнате
           broadcastToRoom(currentRoom, ws, chatMessage);
           break;
           
         case 'typing':
-          // Индикатор набора текста
           const typingMessage = {
             type: 'typing',
             username: username,
@@ -144,11 +132,9 @@ wss.on('connection', (ws) => {
           break;
           
         case 'change_room':
-          // Смена комнаты
           const oldRoom = currentRoom;
           const newRoom = message.room;
           
-          // Удаляем из старой комнаты
           if (rooms[oldRoom]) {
             rooms[oldRoom].clients.delete(ws);
             updateUserList(oldRoom);
@@ -165,17 +151,13 @@ wss.on('connection', (ws) => {
             broadcastToRoom(oldRoom, ws, leaveMessage);
           }
           
-          // Добавляем в новую комнату
           currentRoom = newRoom;
           if (!rooms[currentRoom]) {
             rooms[currentRoom] = { clients: new Map(), messages: [] };
           }
           rooms[currentRoom].clients.set(ws, username);
-          
-          // Отправляем историю новой комнаты
           sendMessageHistory(currentRoom);
           
-          // Оповещаем о присоединении к новой комнате
           const joinNewMessage = {
             type: 'message',
             id: generateMessageId(),
@@ -188,11 +170,47 @@ wss.on('connection', (ws) => {
           broadcastToRoom(currentRoom, ws, joinNewMessage);
           updateUserList(currentRoom);
           
-          // Подтверждаем клиенту смену комнаты
           ws.send(JSON.stringify({
             type: 'room_changed',
             room: currentRoom
           }));
+          break;
+          
+        // ========== РЕАКЦИИ - НОВЫЙ ОБРАБОТЧИК ==========
+        case 'reaction':
+          console.log(`👍 Реакция от ${username}: ${message.reaction} на сообщение ${message.messageId}`);
+          
+          const reactionBroadcast = {
+            type: 'reaction',
+            messageId: message.messageId,
+            reaction: message.reaction,
+            username: username,
+            timestamp: new Date().toISOString()
+          };
+          broadcastToRoom(currentRoom, ws, reactionBroadcast);
+          break;
+          
+        // ========== ИЗОБРАЖЕНИЯ ==========
+        case 'image':
+          if (!username) return;
+          
+          const imageMessage = {
+            type: 'image',
+            id: generateMessageId(),
+            username: username,
+            imageData: message.imageData,
+            caption: message.caption || '',
+            timestamp: new Date().toISOString(),
+            isSystem: false
+          };
+          
+          const imgRoom = rooms[currentRoom];
+          imgRoom.messages.push(imageMessage);
+          if (imgRoom.messages.length > MAX_MESSAGES) {
+            imgRoom.messages.shift();
+          }
+          
+          broadcastToRoom(currentRoom, ws, imageMessage);
           break;
       }
     } catch (error) {
@@ -203,7 +221,6 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('Соединение закрыто');
     if (username && rooms[currentRoom]) {
-      // Удаляем пользователя из комнаты
       rooms[currentRoom].clients.delete(ws);
       updateUserList(currentRoom);
       
