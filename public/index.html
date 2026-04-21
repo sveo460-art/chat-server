@@ -1,13 +1,8 @@
-<!-- Эмодзи-пикер -->
-<script type="module">
-    import 'https://cdn.jsdelivr.net/npm/emoji-picker-element@1.18.3/index.js';
-</script>
-<emoji-picker id="emojiPicker" style="display: none; position: absolute; bottom: 80px; right: 20px; z-index: 1000; max-width: 300px;"></emoji-picker>
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>WebSocket Чат</title>
     <style>
         * {
@@ -212,6 +207,12 @@
             width: 300px;
         }
         
+        .join-form h2 {
+            margin-bottom: 20px;
+            text-align: center;
+            color: #333;
+        }
+        
         .join-form input {
             width: 100%;
             padding: 10px;
@@ -227,6 +228,23 @@
             color: white;
             border: none;
             border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        .join-form button:hover {
+            background: #0056b3;
+        }
+        
+        .reactions-container {
+            margin-top: 5px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        
+        button {
+            background: none;
+            border: none;
             cursor: pointer;
         }
     </style>
@@ -267,5 +285,11 @@
     </div>
     
     <script src="client.js"></script>
+    
+    <!-- Эмодзи-пикер -->
+    <script type="module">
+        import 'https://cdn.jsdelivr.net/npm/emoji-picker-element@1.18.3/index.js';
+    </script>
+    <emoji-picker id="emojiPicker" style="display: none; position: absolute; bottom: 80px; right: 20px; z-index: 1000; max-width: 300px;"></emoji-picker>
 </body>
 </html>
