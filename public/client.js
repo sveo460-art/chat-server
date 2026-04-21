@@ -5,7 +5,6 @@ let currentRoom = 'general';
 let typingTimeout = null;
 let notificationPermission = false;
 let unreadCount = 0;
-let emojiPickerVisible = false;
 
 // ========== Подключение к чату ==========
 function joinChat() {
@@ -33,7 +32,6 @@ function joinChat() {
         document.getElementById('chatContainer').style.display = 'flex';
         document.getElementById('currentUser').textContent = currentUser;
         
-        // Добавляем кнопки после загрузки
         setTimeout(() => {
             addEmojiButton();
             addImageButton();
@@ -67,7 +65,9 @@ function handleMessage(data) {
             break;
         case 'image':
             displayImageMessage(data);
-            showNotification(data.username, '📷 Изображение');
+            break;
+        case 'reaction':
+            displayReaction(data);
             break;
         case 'history':
             displayHistory(data.messages);
@@ -102,10 +102,8 @@ function displayMessage(message) {
                 <span> ${time}</span>
             </div>
             <div class="message-content">${escapeHtml(message.content)}</div>
-            <div class="message-reactions" id="reactions-${message.id}"></div>
+            <div class="reactions-container" id="reactions-${message.id}" style="margin-top: 5px;"></div>
         `;
-        
-        // Добавляем кнопки реакций
         addReactionButtons(message.id);
     }
     
@@ -128,13 +126,11 @@ function displayImageMessage(message) {
         </div>
         <img src="${message.imageData}" style="max-width: 250px; max-height: 250px; border-radius: 10px; margin-top: 5px; cursor: pointer;" onclick="window.open('${message.imageData}', '_blank')">
         ${message.caption ? `<div style="margin-top: 5px; color: #666;">${escapeHtml(message.caption)}</div>` : ''}
-        <div class="message-reactions" id="reactions-${message.id}"></div>
+        <div class="reactions-container" id="reactions-${message.id}" style="margin-top: 5px;"></div>
     `;
     
     messagesDiv.appendChild(messageDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    
-    // Добавляем кнопки реакций
     addReactionButtons(message.id);
 }
 
@@ -151,7 +147,7 @@ function displayHistory(messages) {
     });
 }
 
-// ========== Реакции на сообщения ==========
+// ========== РЕАКЦИИ ==========
 function addReactionButtons(messageId) {
     const reactionsDiv = document.getElementById(`reactions-${messageId}`);
     if (!reactionsDiv) return;
@@ -161,23 +157,64 @@ function addReactionButtons(messageId) {
         const btn = document.createElement('button');
         btn.textContent = reaction;
         btn.style.margin = '2px';
-        btn.style.padding = '2px 6px';
+        btn.style.padding = '2px 8px';
         btn.style.border = 'none';
         btn.style.borderRadius = '12px';
         btn.style.cursor = 'pointer';
-        btn.style.fontSize = '12px';
+        btn.style.fontSize = '14px';
+        btn.style.backgroundColor = '#e9ecef';
         btn.onclick = () => addReaction(messageId, reaction);
         reactionsDiv.appendChild(btn);
     });
 }
 
 function addReaction(messageId, reaction) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        console.log('WebSocket не подключен');
+        return;
+    }
+    
     ws.send(JSON.stringify({
         type: 'reaction',
         messageId: messageId,
         reaction: reaction,
         username: currentUser
     }));
+}
+
+function displayReaction(reaction) {
+    const messageDiv = document.getElementById(`msg-${reaction.messageId}`);
+    if (!messageDiv) {
+        console.log('Сообщение не найдено:', reaction.messageId);
+        return;
+    }
+    
+    let container = messageDiv.querySelector('.reactions-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'reactions-container';
+        container.style.marginTop = '5px';
+        messageDiv.appendChild(container);
+    }
+    
+    // Удаляем старую реакцию этого пользователя
+    const oldReaction = container.querySelector(`.reaction-${reaction.username}`);
+    if (oldReaction) oldReaction.remove();
+    
+    // Добавляем новую
+    const reactionSpan = document.createElement('span');
+    reactionSpan.className = `reaction-${reaction.username}`;
+    reactionSpan.textContent = `${reaction.reaction} ${reaction.username}`;
+    reactionSpan.style.marginRight = '8px';
+    reactionSpan.style.fontSize = '12px';
+    reactionSpan.style.backgroundColor = '#e9ecef';
+    reactionSpan.style.padding = '2px 8px';
+    reactionSpan.style.borderRadius = '12px';
+    reactionSpan.style.display = 'inline-block';
+    
+    container.appendChild(reactionSpan);
+    
+    console.log(`Реакция ${reaction.reaction} от ${reaction.username} отображена`);
 }
 
 // ========== Список пользователей ==========
@@ -251,7 +288,6 @@ function sendImage() {
         }
         
         const reader = new FileReader();
-        
         reader.onload = (event) => {
             ws.send(JSON.stringify({
                 type: 'image',
@@ -259,7 +295,6 @@ function sendImage() {
                 caption: ''
             }));
         };
-        
         reader.readAsDataURL(file);
     };
     
@@ -267,6 +302,8 @@ function sendImage() {
 }
 
 // ========== Эмодзи-пикер ==========
+let emojiPickerVisible = false;
+
 function toggleEmojiPicker() {
     const picker = document.getElementById('emojiPicker');
     if (!picker) return;
@@ -364,7 +401,6 @@ function showNotification(sender, message) {
     }
 }
 
-// Сброс счётчика при фокусе на странице
 window.addEventListener('focus', () => {
     unreadCount = 0;
     document.title = 'Чат';
@@ -377,10 +413,9 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Запрашиваем разрешение на уведомления
+// Запуск
 requestNotificationPermission();
 
-// ========== Обработка Enter в поле ввода ==========
 document.addEventListener('DOMContentLoaded', () => {
     const messageInput = document.getElementById('messageInput');
     if (messageInput) {
